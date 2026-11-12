@@ -12,6 +12,8 @@ prisma/dev.db
 prisma/dev.db-journal
 prisma/*.db*
 prisma/schema.local.prisma
+prisma/_out-*.txt
+prisma/_e2e-failure.png
 prisma/*.db-journal
 scratch/
 coverage
