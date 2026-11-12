@@ -1,0 +1,500 @@
+// StudyMaster — Prisma schema
+// SQLite locally. Enums are stored as strings so this migrates to Postgres
+// on Vercel by changing the datasource provider only.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  name            String
+  passwordHash    String
+  createdAt       DateTime  @default(now())
+  dailyStudyHours Float     @default(2)
+  /**
+   * Preferred local start time for planned blocks, e.g. "18:00".
+   */
+  studyStartTime  String    @default("18:00")
+  xp              Int       @default(0)
+  streak          Int       @default(0)
+  longestStreak   Int       @default(0)
+  lastActiveDate  DateTime?
+  onboarded       Boolean   @default(false)
+  reminderEnabled Boolean   @default(true)
+
+  subjects          Subject[]
+  extractionReports ExtractionReport[]
+  topics            Topic[]
+  planDays          PlanDay[]
+  focusSessions     FocusSession[]
+  quizzes           Quiz[]
+  attempts          QuizAttempt[]
+  flashcards        Flashcard[]
+  cardReviews       FlashcardReview[]
+  notes             Note[]
+  aiMessages        AiMessage[]
+  goals             DailyGoal[]
+  xpEvents          XpEvent[]
+  achievements      UserAchievement[]
+  generationJobs    GenerationJob[]
+  exams             Exam[]
+}
+
+model Subject {
+  id                 String    @id @default(cuid())
+  userId             String
+  name               String
+  /// Optional free-text description. Subjects are study containers: adding one
+  /// never creates roadmap work until a dated test selects its topics.
+  description        String    @default("")
+  color              String    @default("mint")
+  examDate           DateTime?
+  importance         Int       @default(3)
+  /// 1 (easy) – 5 (very difficult). Used by the priority algorithm.
+  difficulty         Int       @default(3)
+  /// beginner | intermediate | advanced
+  prepLevel          String    @default("intermediate")
+  /// False while a detected syllabus is waiting for the student's approval.
+  syllabusApproved   Boolean   @default(true)
+  /// SHA-256 of the sources the current syllabus was extracted from. When the
+  /// sources are unchanged, detection short-circuits instead of reprocessing.
+  syllabusSourceHash String    @default("")
+  createdAt          DateTime  @default(now())
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topics            Topic[]
+  extractionReports ExtractionReport[]
+  planItems         PlanItem[]
+  quizzes           Quiz[]
+  flashcards        Flashcard[]
+  notes             Note[]
+  exams             Exam[]
+
+  @@index([userId])
+}
+
+/// Any number of upcoming tests/exams per subject (unit test, midterm, final…).
+/// `Subject.examDate` is kept as a derived cache of the nearest upcoming exam
+/// so the scheduler, dashboard and analytics keep one simple deadline to use.
+model Exam {
+  id         String   @id @default(cuid())
+  userId     String
+  subjectId  String
+  name       String
+  date       DateTime
+  importance Int      @default(3)
+  /// Per-test difficulty (1 easy – 5 very difficult).
+  difficulty Int      @default(3)
+  /// beginner | intermediate | advanced
+  prepLevel  String   @default("intermediate")
+  /// What material the student has for this test (notes, textbook, past papers…).
+  material   String   @default("")
+  createdAt  DateTime @default(now())
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject    Subject     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  examTopics ExamTopic[]
+
+  @@index([userId, date])
+  @@index([subjectId, date])
+}
+
+/// Which shared-syllabus topics a specific test covers. A topic can belong to
+/// several tests; the roadmap schedules the nearest test that includes it.
+/// Each topic on the test has a student difficulty rating (easy, medium, hard).
+model ExamTopic {
+  id         String @id @default(cuid())
+  examId     String
+  topicId    String
+  difficulty String @default("medium") // easy | medium | hard
+
+  exam  Exam  @relation(fields: [examId], references: [id], onDelete: Cascade)
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([examId, topicId])
+  @@index([topicId])
+}
+
+model Topic {
+  id               String    @id @default(cuid())
+  userId           String
+  subjectId        String
+  /// Parent chapter/topic for the detected syllabus tree.
+  parentId         String?
+  /// The note a topic was detected from (null for manually added topics).
+  noteId           String?
+  name             String
+  /// Human-readable chapter this topic belongs to, e.g. "Unit 2 · Cells".
+  chapter          String    @default("")
+  /// chapter | topic | subtopic | concept | definition | formula | process | problem
+  kind             String    @default("topic")
+  /// Page/passage reference such as "p. 12" or "Unit 2, paragraph 3".
+  sourceRef        String    @default("")
+  position         Int       @default(0)
+  /// Detected topics start unapproved so the roadmap waits for a review.
+  approved         Boolean   @default(true)
+  difficulty       Int       @default(3)
+  importance       Int       @default(3)
+  estimatedMinutes Int       @default(60)
+  status           String    @default("not_started") // not_started | in_progress | studied | revised | mastered
+  masteryScore     Float     @default(0)
+  lastStudiedAt    DateTime?
+  createdAt        DateTime  @default(now())
+
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject        Subject     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  note           Note?       @relation("NoteParent", fields: [noteId], references: [id], onDelete: SetNull)
+  /// Notes associated with (covering) this syllabus topic.
+  coveredByNotes Note[]      @relation("NoteCoversTopic")
+  parent         Topic?      @relation("TopicTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children       Topic[]     @relation("TopicTree")
+  planItems      PlanItem[]
+  quizzes        Quiz[]
+  flashcards     Flashcard[]
+  examTopics     ExamTopic[]
+
+  @@index([userId])
+  @@index([subjectId])
+  @@index([noteId])
+  @@index([parentId])
+}
+
+model PlanDay {
+  id     String     @id @default(cuid())
+  userId String
+  date   DateTime
+  items  PlanItem[]
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([userId])
+}
+
+model PlanItem {
+  id          String    @id @default(cuid())
+  planDayId   String
+  topicId     String?
+  subjectId   String?
+  title       String
+  kind        String    @default("study") // study | revision | quiz
+  /**
+   * Local start time, e.g. "18:25".
+   */
+  startTime   String?
+  minutes     Int       @default(30)
+  order       Int       @default(0)
+  priority    Float     @default(0)
+  reason      String    @default("")
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+
+  planDay PlanDay  @relation(fields: [planDayId], references: [id], onDelete: Cascade)
+  topic   Topic?   @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+
+  @@index([planDayId])
+}
+
+model FocusSession {
+  id             String    @id @default(cuid())
+  userId         String
+  subjectId      String?
+  topicId        String?
+  label          String    @default("Focus session")
+  plannedMinutes Int       @default(25)
+  focusSeconds   Int       @default(0)
+  breakSeconds   Int       @default(0)
+  completed      Boolean   @default(false)
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startedAt])
+}
+
+model Quiz {
+  id            String   @id @default(cuid())
+  userId        String
+  subjectId     String?
+  topicId       String?
+  noteId        String?
+  title         String
+  description   String   @default("")
+  source        String   @default("manual") // manual | ai | notes
+  /// easy | medium | hard
+  difficulty    String   @default("medium")
+  /// JSON array of requested question formats, e.g. ["conceptual","application"].
+  questionTypes String   @default("[]")
+  timeLimitSec  Int?
+  createdAt     DateTime @default(now())
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject   Subject?      @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  topic     Topic?        @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  questions Question[]
+  attempts  QuizAttempt[]
+
+  @@index([userId])
+}
+
+model Question {
+  id            String @id @default(cuid())
+  quizId        String
+  /// mcq | truefalse | match | short | long | application | problem
+  type          String @default("mcq")
+  /// conceptual | definition | application | scenario | comparison | problem | formula | factual
+  format        String @default("conceptual")
+  topicLabel    String @default("")
+  sourceRef     String @default("")
+  difficulty    String @default("medium")
+  prompt        String
+  options       String @default("[]") // JSON array of strings
+  correctAnswer String
+  explanation   String @default("")
+  points        Int    @default(1)
+  order         Int    @default(0)
+
+  quiz    Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  answers Answer[]
+
+  @@index([quizId])
+}
+
+model QuizAttempt {
+  id           String    @id @default(cuid())
+  quizId       String
+  userId       String
+  startedAt    DateTime  @default(now())
+  submittedAt  DateTime?
+  score        Float     @default(0)
+  maxScore     Float     @default(0)
+  timeSpentSec Int       @default(0)
+
+  quiz    Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers Answer[]
+
+  @@index([userId, submittedAt])
+}
+
+model Answer {
+  id            String  @id @default(cuid())
+  attemptId     String
+  questionId    String
+  response      String  @default("")
+  isCorrect     Boolean @default(false)
+  awardedPoints Float   @default(0)
+
+  attempt  QuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId])
+}
+
+model Flashcard {
+  id             String    @id @default(cuid())
+  userId         String
+  subjectId      String?
+  topicId        String?
+  noteId         String?
+  /// Generation job that produced this card (null for manual cards).
+  jobId          String?
+  front          String
+  back           String
+  source         String    @default("manual") // manual | ai | notes
+  /// concept | definition | explanation | comparison | application | process | formula
+  format         String    @default("concept")
+  /// Topic/chapter label shown on the card, independent of the DB relation.
+  topicLabel     String    @default("")
+  /// Page/passage reference from the source document, when known.
+  sourceRef      String    @default("")
+  /// easy | medium | hard
+  difficulty     String    @default("medium")
+  ease           Float     @default(2.5)
+  intervalDays   Int       @default(0)
+  repetitions    Int       @default(0)
+  lapses         Int       @default(0)
+  dueAt          DateTime  @default(now())
+  lastRating     String?
+  lastReviewedAt DateTime?
+  createdAt      DateTime  @default(now())
+
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject Subject?          @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  topic   Topic?            @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  reviews FlashcardReview[]
+
+  @@index([userId, dueAt])
+  @@index([jobId])
+}
+
+model FlashcardReview {
+  id         String   @id @default(cuid())
+  cardId     String
+  userId     String
+  rating     String
+  reviewedAt DateTime @default(now())
+  nextDueAt  DateTime
+
+  card Flashcard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, reviewedAt])
+}
+
+model Note {
+  id                 String   @id @default(cuid())
+  userId             String
+  subjectId          String?
+  title              String
+  content            String
+  /// ready | extracting | recognizing | identifying | generating | completed | failed
+  status             String   @default("ready")
+  /// none | detected | approved | failed
+  syllabusStatus     String   @default("none")
+  /// syllabus | notes — which section of the subject this document belongs to.
+  /// "syllabus" documents (official syllabus PDFs) are the only ones allowed
+  /// to propose topic trees; "notes" documents never touch the syllabus.
+  role               String   @default("notes")
+  /// The approved syllabus topic this note is associated with, when its
+  /// content matches one. Set on upload, cleared if the topic is deleted.
+  topicId            String?
+  /// SHA-256 of this note's content when its syllabus detection last ran.
+  syllabusSourceHash String   @default("")
+  /// text | pdf | docx | image | scanned
+  sourceKind         String   @default("text")
+  pages              Int?
+  skippedPages       Int?
+  ocr                Boolean  @default(false)
+  processingError    String   @default("")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  topic   Topic?   @relation("NoteCoversTopic", fields: [topicId], references: [id], onDelete: SetNull)
+  /// Back-relation of Topic.noteId ("this topic was detected from this note").
+  topics  Topic[]  @relation("NoteParent")
+
+  @@index([userId])
+}
+
+/// A background AI generation run. The client starts a job, then polls the
+/// status endpoint so the UI can show real staged progress instead of a spinner.
+model GenerationJob {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String   @default("flashcards") // flashcards | quiz
+  status    String   @default("queued") // queued | running | completed | failed
+  stage     String   @default("queued")
+  progress  Int      @default(0)
+  total     Int      @default(0)
+  produced  Int      @default(0)
+  message   String   @default("")
+  error     String   @default("")
+  /// JSON payload for the background runner (source material, count, context).
+  payload   String   @default("")
+  subjectId String?
+  topicId   String?
+  noteId    String?
+  resultId  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, status])
+}
+
+model AiMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  role      String // user | assistant
+  content   String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model DailyGoal {
+  id            String   @id @default(cuid())
+  userId        String
+  date          DateTime
+  targetMinutes Int      @default(120)
+  status        String   @default("pending") // pending | done
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([userId])
+}
+
+model XpEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  amount    Int
+  refId     String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model Achievement {
+  code        String @id
+  title       String
+  description String
+  icon        String
+  xpReward    Int    @default(0)
+
+  users UserAchievement[]
+}
+
+model UserAchievement {
+  id              String   @id @default(cuid())
+  userId          String
+  achievementCode String
+  earnedAt        DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementCode], references: [code], onDelete: Cascade)
+
+  @@unique([userId, achievementCode])
+  @@index([userId])
+}
+
+model ExtractionReport {
+  id             String   @id @default(cuid())
+  userId         String
+  subjectId      String
+  documentName   String
+  totalPages     Int
+  processedPages Int
+  skippedPages   Int
+  totalChunks    Int
+  chapters       Int
+  topics         Int
+  subtopics      Int
+  status         String   @default("partial")
+  createdAt      DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@index([userId, subjectId])
+}
