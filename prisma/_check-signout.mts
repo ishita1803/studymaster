@@ -4,7 +4,7 @@
  */
 import { chromium } from "playwright";
 
-const base = "http://localhost:3000";
+const base = process.argv[2] ?? "http://localhost:3000";
 const browser = await chromium.launch();
 try {
   const context = await browser.newContext();

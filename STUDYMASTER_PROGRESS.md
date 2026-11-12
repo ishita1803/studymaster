@@ -1,5 +1,52 @@
 # StudyMaster progress
 
+## Date: 2026-11-12 (deployment VERIFIED: all routes 200 on Vercel + Supabase)
+
+### Verified (two consecutive hosted e2e sweeps)
+- https://studymaster-zeta.vercel.app — login OK; ALL 14 routes 200 with
+  0 console errors and 0 AI calls across two full sweeps.
+  Warm timings: dashboard ~4.0 s, roadmap 13.6–15.1 s (heaviest, first-hit
+  planning page), everything else 2.9–6.7 s. Function region: bom1 (Mumbai).
+- The earlier 500s (dashboard/flashcards) were the cold-start window right
+  after the redeploy — old instances draining with the stale
+  connection_limit=1 env; with the corrected env
+  (pgbouncer=true&connection_limit=10&pool_timeout=30) they are gone.
+
+### Fixes done this block
+- prisma/dev.db restored to demo-only (deleted the OneDrive-resurrected
+  ishitaprajapati1803@gmail.com; demo data intact: 4 subjects, 5 exams,
+  23 plan days). prisma/_cleanup-devdb.mts kept as the record script.
+- Vercel CLI linked (`vercel link --project studymaster`); owner
+  ishitaprajapati1803-8742. Runtime logs confirmed function region bom1.
+- prisma/_check-signout.mts now accepts a baseURL argument (verified against
+  prod: login lands on https://studymaster-zeta.vercel.app/dashboard).
+
+### Remaining (user's call, not bugs)
+- Email verification / password reset: intentionally absent (own credentials
+  auth, not Supabase Auth); needs an email provider (e.g. Resend) to build.
+- Roadmap first-hit ~14 s on cold serverless; warm loads are fine.
+
+## Date: 2026-11-12 (Vercel deployed; Supabase pool timeouts diagnosed; fix pending redeploy)
+
+### Status
+- Deployed: https://studymaster-zeta.vercel.app — login OK, roadmap/subjects/
+  notes/quizzes/focus/settings OK (Supabase data live), but dashboard/
+  flashcards/analytics/achievements returned 500 at ~10.3 s.
+- Root cause confirmed via local reproduction: Prisma P2024 "Timed out fetching
+  a new connection from the connection pool" (pool_timeout 10). The
+  connection_limit=1 I put in the Vercel DATABASE_URL serializes ~20 parallel
+  dashboard queries through one connection → queue exceeds 10 s → 500.
+- Fix (validated mechanism locally, exact numbers pending hosted verify):
+  DATABASE_URL → …:6543/postgres?pgbouncer=true&connection_limit=10&pool_timeout=30
+  User must update the env var in Vercel and redeploy, then hosted e2e re-run.
+- Local was temporarily pointed at Supabase for diagnosis (Postgres client
+  regen); restored to SQLite per the standing decision — signout probe PASS,
+  local instant again. db:local regenerate loop works cleanly.
+- NOTED: local dev.db is a OneDrive-resurrected older copy that still contains
+  ishitaprajapati1803@gmail.com; awaiting user decision on cleanup.
+- Email verification: intentionally absent — app uses its own credentials auth
+  (bcrypt + JWT), not Supabase Auth; README "Before a public launch" lists it.
+
 ## Date: 2026-11-12 (GitHub + Supabase deployment prep)
 
 ### Goal
