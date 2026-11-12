@@ -9,6 +9,8 @@
     "lint": "next lint",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
+    "db:local": "node prisma/_make-local-schema.mjs",
+    "db:local:seed": "node prisma/_make-local-schema.mjs seed",
     "db:studio": "prisma studio",
     "db:reset": "prisma db push --force-reset && prisma db seed",
     "test": "vitest run",

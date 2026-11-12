@@ -1,5 +1,44 @@
 # StudyMaster progress
 
+## Date: 2026-11-12 (GitHub + Supabase deployment prep)
+
+### Goal
+Upload to GitHub (ishita1803/studymaster, public) and deploy on Vercel with
+Supabase Postgres.
+
+### Work done
+- Audited repo for secrets: only `.env.local`/`.env` hold them (gitignored);
+  `.env.example` is the safe template. Old backup DB `dev.db.bak-*` caught at
+  staging and excluded (gitignore widened to `prisma/*.db*`); `schema.local.prisma`
+  also ignored. 184 files in the initial commit, zero secrets/databases.
+- Git identity set to ishita1803 + noreply email; initial commit b7df3ad.
+- `postinstall: prisma generate` added to package.json (Vercel build requirement).
+- Prisma datasource switched to `postgresql` with `directUrl` env; Supabase
+  schema pushed (`prisma db push`) and demo dataset seeded successfully —
+  verified: 1 user (demo), 4 subjects, 5 exams, 16 topics, 3 quizzes,
+  14 flashcards, 5 notes, 29 plan days. Seed process doesn't exit cleanly
+  (hangs at the end) but completes its writes.
+- Supabase connectivity from this machine measured UNSTABLE: session pooler
+  :5432 failed outright; direct :5432 and transaction pooler :6543 each
+  ~50% connect success at 3–10 s (Prisma default 5 s timeout hit on failures).
+  Earlier the same day a sustained 5-minute seed ran fine — ISP-level flakiness.
+- DECISION (user-approved): local development on SQLite (prisma/dev.db,
+  still intact with demo data), production on Supabase Postgres. New
+  `npm run db:local` / `db:local:seed` (prisma/_make-local-schema.mjs)
+  generates schema.local.prisma from the committed Postgres schema.
+- `.env.local` back to `file:./dev.db`; `.env` holds the Supabase URLs for
+  remote CLI ops (db:push / db:seed target Supabase).
+- NOTED: local dev.db resurrected an old copy containing
+  ishitaprajapati1803@gmail.com (deleted in the handover) — OneDrive
+  rehydration artifact; local-only, gitignored, awaiting user decision.
+- Gates: tsc clean, vitest 151/151, build green, e2e login OK / all routes
+  200 / 0 AI calls / 0 console errors, sign-out probe stays on :3000.
+
+### Supabase credentials (Vercel env vars to set)
+- DATABASE_URL: postgresql://postgres.wyramcwptuuqwebsiyxf:<PW>@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1 (transaction pooler)
+- NEXTAUTH_URL: the Vercel deployment URL; NEXTAUTH_SECRET: same value as local;
+  AUTH_TRUST_HOST=true; GEMINI_API_KEY + GEMINI_MODEL same as local.
+
 ## Date: 2026-11-12 (login/logout redirected to localhost:3001 — fixed)
 
 ### User complaint

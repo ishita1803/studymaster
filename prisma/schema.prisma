@@ -1,14 +1,18 @@
 // StudyMaster — Prisma schema
-// SQLite locally. Enums are stored as strings so this migrates to Postgres
-// on Vercel by changing the datasource provider only.
+// Production (Vercel + Supabase): Postgres via DATABASE_URL/DIRECT_URL.
+// Local development: SQLite via `npm run db:local`, which generates
+// prisma/schema.local.prisma (this file with a swapped datasource block)
+// and points DATABASE_URL at prisma/dev.db. Enums are stored as strings
+// so both providers share one model set.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
