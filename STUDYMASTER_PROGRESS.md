@@ -1,5 +1,57 @@
 # StudyMaster progress
 
+## Date: 2026-11-13 (SLOW SITE FIXED: Mumbai Supabase + bom1 functions; real DB discovered)
+
+### Final state
+- Production: https://studymaster-zeta.vercel.app — ALL 14 routes 200,
+  warm click timings 0.4–0.9 s (was 5–18 s). Ping from function to DB: 2 ms.
+- Database: NEW Supabase project `uehmkwhbtodruhxzmfgu` (ap-south-1 Mumbai,
+  free tier). Data: demo seed (1 demo user / 4 subjects / 5 exams / 16 topics
+  / 3 quizzes / 14 flashcards / 5 notes / 29 plan days) + imported real user
+  ishitaprajapati1803@gmail.com (account row with password hash + biology
+  subject + 1 exam + 1 daily goal). Counts now: 2 users / 5 subjects / 6 exams.
+- Vercel function region: **bom1 (Mumbai)** — set via REST API
+  (PATCH /v9/projects, field `serverlessFunctionRegion`; was iad1 US-East!).
+- DB URL env: `APP_DATABASE_URL` = transaction pooler :6543
+  (pgbouncer=true&connection_limit=5&pool_timeout=10). src/lib/db.ts reads
+  APP_DATABASE_URL ?? DATABASE_URL.
+
+### Root causes of the original slowness (three stacked problems)
+1. Vercel function region was **iad1 (US-East)** — every request from India
+   crossed the planet, and the Supabase marketplace integration set this
+   silently. Fixed → bom1.
+2. The integration **manages DATABASE_URL itself**: every CLI
+   `vercel env rm/add DATABASE_URL` was a silent no-op, so the app always ran
+   on the integration's transaction-pooler URL (1.1 s/query from US). Fixed
+   via dedicated APP_DATABASE_URL read in code.
+3. Session pooler :5432 (fast, 220 ms→2 ms after region fix) exhausts the
+   free-tier `pool_size: 15` when ~15 serverless lambdas warm up
+   (EMAXCONNSESSION 500s under load). Transaction pooler with both endpoints
+   in Mumbai avoids per-lambda session holds; per-query overhead is now
+   ~10–30 ms, so 6543 is the safe and fast choice.
+
+### How the move was executed (home ISP to Supabase is flaky ~50%)
+- Schema + seed + user import ran from INSIDE Vercel via a temporary
+  /api/admin-setup route (token-gated, then deleted): stage=apply pushed 92
+  DDL statements ($executeRawUnsafe), stage=reset truncated + ran the seed
+  via exported seedPromise (prisma/seed.ts now exports it), stage=export /
+  stage=import copied the real user across DBs preserving IDs.
+- Old projects NOT deleted (data preserved): wyramcwptuuqwebsiyxf (Sydney,
+  demo-only) and jhyhesjgqvwwbirmwgsb (Sydney, the app's ACTUAL previous
+  production DB with the original user account). Recommend pausing both in
+  the Supabase dashboard once satisfied (free tier prefers 2 active).
+
+### Gotchas recorded for next time
+- Supabase pooler hosts accept cross-region usernames (aws-1-ap-south-1...
+  happily connected to a Sydney project) — verify region by timing from
+  Vercel, never by hostname.
+- `prisma migrate diff --script > file` via PowerShell captures npx stderr
+  warnings into the file; strip before executing.
+- Supabase circuit breaker (ECIRCUITBREAKER) trips on repeated failed
+  handshakes from flaky ISPs; wait ~5 min and stop hammering.
+- The Supabase access token pasted in chat was later revoked (it showed
+  "Invalid access token" mid-session). No live secrets remain in chat.
+
 ## Date: 2026-11-12 (deployment VERIFIED: all routes 200 on Vercel + Supabase)
 
 ### Verified (two consecutive hosted e2e sweeps)
