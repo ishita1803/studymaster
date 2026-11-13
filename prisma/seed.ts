@@ -800,7 +800,12 @@ async function main() {
   console.log(`   Reviews:  ${totalReviews} flashcard reviews`);
 }
 
-main()
+/**
+ * Exported so the one-off /api/admin-setup route can run the seed from inside
+ * the deployed app (avoids flaky local <-> Supabase links). The CLI path below
+ * still works exactly as before.
+ */
+export const seedPromise = main()
   .catch((error) => {
     console.error("Seed failed:", error);
     process.exitCode = 1;
